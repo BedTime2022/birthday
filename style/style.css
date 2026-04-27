@@ -1,7 +1,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  background: #111;
+  background: #ae83a5;
   color: #eee;
   font-family: 'VT323', monospace;
   font-size: 1.1rem;
@@ -11,8 +11,10 @@ body {
   margin: 0 auto;
 }
 
-h1 { font-size: 2.2rem; color: #ff9de2; margin-bottom: 0.2rem; }
-.subtitle { color: #888; font-size: 1rem; margin-bottom: 1.2rem; }
+h1 { font-size: 6rem; color: #211c1f; margin-bottom: 0.2rem; }
+h2 { font-size: 2.2rem; color: #211c1f; margin-bottom: 0.2rem; }
+.subtitle { color: #ae0000; font-size: 1rem; margin-bottom: 1.2rem; }
+p { color: #000000; font-size: 2rem; margin-bottom: 1.2rem; }
 
 /* ── Chat feed ─────────────────────────────── */
 #chat {
