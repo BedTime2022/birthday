@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Saulo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style/style.css">
+
+  <!-- Firebase SDKs (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+</head>
+<body>
+
+<h1>FELIZ CUMPLEANOS</h1>
+<p class="subtitle">Manda un mensaje, un dibujo o una foto!</p>
+
+<div id="chat" aria-live="polite" aria-atomic="true"></div>
+
+<div id="controls">
+  <div class="name-row">
+    <input type="text" id="user-input" placeholder="Tu nombre (opcional)" maxlength="40">
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="texto"  onclick="switchTab('texto')" >Mensaje</button>
+    
+    <button class="tab-btn"        data-tab="foto"   onclick="switchTab('foto')"  >Foto</button>
+  </div>
+
+  <!-- MENSAJE -->
+  <div class="tab-panel active" id="panel-texto">
+    <textarea id="text-input" placeholder="Escribe algo... (o pega un enlace de imagen o YouTube)"></textarea>
+  </div>
+
+  <!-- DIBUJO -->
+  <div class="tab-panel" id="panel-dibujo">
+    <div class="draw-toolbar" id="draw-toolbar"></div>
+    <canvas id="drawCanvas" width="600" height="600"></canvas>
+  </div>
+
+  <!-- FOTO -->
+  <div class="tab-panel" id="panel-foto">
+    <label class="upload-label" for="file-input">Haz clic para elegir una foto o imagen</label>
+    <input type="file" id="file-input" accept="image/*">
+    <img id="upload-preview" alt="vista previa">
+  </div>
+
+  <button id="send-btn" onclick="submitPost()">Publicar</button>
+  <div class="status-msg" id="status-msg"></div>
+</div>
+
+<script>
+// ── Firebase init ─────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyBHntKoK3N6vUZyUKCKEqD-EFcKb4xYRD0",
+  authDomain: "saulo-cumple.firebaseapp.com",
+  databaseURL: "https://saulo-cumple-default-rtdb.firebaseio.com",
+  projectId: "saulo-cumple",
+  storageBucket: "saulo-cumple.firebasestorage.app",
+  messagingSenderId: "568550167681",
+  appId: "1:568550167681:web:9212ed50ac2891ee9aa980"
+};
+firebase.initializeApp(firebaseConfig);
+
+var currentTab = 'texto';
+
+// ── Firebase ref ──────────────────────────────────────────────
+const chatRef = firebase.database().ref('guestbook').orderByChild('ts').limitToLast(200);
+
+// ── Chat feed ─────────────────────────────────────────────────
+const chatBox = document.getElementById('chat');
+
+function buildMessageElement(msg) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message';
+
+  const meta = document.createElement('div');
+  meta.className = 'meta-row';
+
+  const userSpan = document.createElement('span');
+  userSpan.className = 'message-user';
+  userSpan.textContent = (msg.user || 'Anonimo') + ':';
+
+  const timeSpan = document.createElement('span');
+  timeSpan.className = 'timestamp';
+  timeSpan.textContent = new Date(msg.ts).toLocaleString();
+
+  meta.appendChild(userSpan);
+  meta.appendChild(timeSpan);
+  wrapper.appendChild(meta);
+
+  const content = document.createElement('div');
+  content.className = 'message-text';
+  const text = (msg.text || '').trim();
+
+  if (text.startsWith('data:image/')) {
+    const img = document.createElement('img');
+    img.className = 'chat-image';
+    img.src = text;
+    img.alt = 'Imagen';
+    content.appendChild(img);
+  } else if (/\.(gif|png|jpe?g|webp)(\?.*)?$/i.test(text)) {
+    const img = document.createElement('img');
+    img.className = 'chat-image';
+    img.src = text;
+    img.alt = 'Imagen';
+    content.appendChild(img);
+  } else if (/\.(mp4|webm)(\?.*)?$/i.test(text)) {
+    const vid = document.createElement('video');
+    vid.className = 'chat-video';
+    vid.src = text;
+    vid.controls = true;
+    content.appendChild(vid);
+  } else if (/youtu(?:\.be|be\.com)/.test(text)) {
+    const m = text.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+    if (m) {
+      const iframe = document.createElement('iframe');
+      iframe.className = 'chat-iframe';
+      iframe.height = 180;
+      iframe.src = `https://www.youtube.com/embed/${m[1]}`;
+      iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+      iframe.allowFullscreen = true;
+      content.appendChild(iframe);
+    } else {
+      content.textContent = text;
+    }
+  } else {
+    content.textContent = text;
+  }
+
+  wrapper.appendChild(content);
+  return wrapper;
+}
+
+chatRef.on('child_added', snap => {
+  const el = buildMessageElement(snap.val());
+  chatBox.prepend(el);
+  if (chatBox.scrollTop <= 20) chatBox.scrollTop = 0;
+});
+
+chatRef.once('value', () => setTimeout(() => chatBox.scrollTop = 0, 50));
+
+// ── Cambio de pestana ─────────────────────────────────────────
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-' + tab).classList.add('active');
+  document.querySelector(`.tab-btn[data-tab="${tab}"]`).classList.add('active');
+}
+
+// ── Canvas de dibujo ──────────────────────────────────────────
+const canvas = document.getElementById('drawCanvas');
+const ctx    = canvas.getContext('2d');
+let drawing  = false;
+let penColor = '#222222';
+let penSize  = 6;
+let erasing  = false;
+
+canvas.width  = 600;
+canvas.height = 600;
+ctx.fillStyle = '#ffffff';
+ctx.fillRect(0, 0, 600, 600);
+
+const COLORS = ['#222222','#ffffff','#ef4444','#f97316','#eab308',
+                '#22c55e','#3b82f6','#a855f7','#ec4899','#6b7280'];
+const SIZES  = [3, 6, 12, 20];
+const toolbar = document.getElementById('draw-toolbar');
+
+COLORS.forEach(c => {
+  const sw = document.createElement('div');
+  sw.className = 'swatch' + (c === penColor ? ' sel' : '');
+  sw.style.background = c;
+  if (c === '#ffffff') sw.style.outline = '1px solid #555';
+  sw.onclick = () => {
+    penColor = c;
+    erasing = false;
+    document.querySelectorAll('.swatch').forEach(s => s.classList.remove('sel'));
+    sw.classList.add('sel');
+    document.getElementById('eraser-btn').classList.remove('sel');
+  };
+  toolbar.appendChild(sw);
+});
+
+SIZES.forEach(sz => {
+  const btn = document.createElement('button');
+  btn.className = 'sz-btn' + (sz === penSize ? ' sel' : '');
+  btn.textContent = sz + 'px';
+  btn.onclick = () => {
+    penSize = sz;
+    document.querySelectorAll('.sz-btn').forEach(b => b.classList.remove('sel'));
+    btn.classList.add('sel');
+  };
+  toolbar.appendChild(btn);
+});
+
+const eraserBtn = document.createElement('button');
+eraserBtn.id = 'eraser-btn';
+eraserBtn.className = 'tool-btn';
+eraserBtn.textContent = 'Borrador';
+eraserBtn.onclick = () => {
+  erasing = !erasing;
+  eraserBtn.classList.toggle('sel', erasing);
+};
+toolbar.appendChild(eraserBtn);
+
+const clearBtn = document.createElement('button');
+clearBtn.className = 'tool-btn';
+clearBtn.textContent = 'Limpiar';
+clearBtn.style.marginLeft = 'auto';
+clearBtn.onclick = () => {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+};
+toolbar.appendChild(clearBtn);
+
+function getPos(e) {
+  const r = canvas.getBoundingClientRect();
+  const scaleX = canvas.width  / r.width;
+  const scaleY = canvas.height / r.height;
+  const src = e.touches ? e.touches[0] : e;
+  return {
+    x: (src.clientX - r.left) * scaleX,
+    y: (src.clientY - r.top)  * scaleY
+  };
+}
+
+canvas.addEventListener('mousedown', e => {
+  drawing = true;
+  const p = getPos(e);
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y);
+});
+canvas.addEventListener('mousemove', e => {
+  if (!drawing) return;
+  const p = getPos(e);
+  ctx.lineWidth   = erasing ? penSize * 4 : penSize;
+  ctx.lineCap     = 'round';
+  ctx.lineJoin    = 'round';
+  ctx.strokeStyle = erasing ? '#ffffff' : penColor;
+  ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y);
+});
+canvas.addEventListener('mouseup',    () => drawing = false);
+canvas.addEventListener('mouseleave', () => drawing = false);
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  drawing = true;
+  const p = getPos(e);
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y);
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (!drawing) return;
+  const p = getPos(e);
+  ctx.lineWidth   = erasing ? penSize * 4 : penSize;
+  ctx.lineCap     = 'round';
+  ctx.lineJoin    = 'round';
+  ctx.strokeStyle = erasing ? '#ffffff' : penColor;
+  ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y);
+}, { passive: false });
+canvas.addEventListener('touchend', () => drawing = false);
+
+// ── Subir foto ────────────────────────────────────────────────
+let uploadedDataUrl = null;
+
+document.getElementById('file-input').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 800;
+      let w = img.width, h = img.height;
+      if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+      const tmp = document.createElement('canvas');
+      tmp.width = w; tmp.height = h;
+      tmp.getContext('2d').drawImage(img, 0, 0, w, h);
+      uploadedDataUrl = tmp.toDataURL('image/jpeg', 0.82);
+      const preview = document.getElementById('upload-preview');
+      preview.src = uploadedDataUrl;
+      preview.style.display = 'block';
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+// ── Enviar ────────────────────────────────────────────────────
+const sendBtn  = document.getElementById('send-btn');
+const statusEl = document.getElementById('status-msg');
+
+function setStatus(msg, ok) {
+  statusEl.textContent = msg;
+  statusEl.style.color = ok ? '#ff9de2' : '#f87171';
+}
+
+function isCanvasBlank() {
+  const blank = document.createElement('canvas');
+  blank.width = canvas.width; blank.height = canvas.height;
+  const bc = blank.getContext('2d');
+  bc.fillStyle = '#ffffff';
+  bc.fillRect(0, 0, blank.width, blank.height);
+  return canvas.toDataURL() === blank.toDataURL();
+}
+
+function submitPost() {
+  const user = document.getElementById('user-input').value.trim() || 'Anonimo';
+  let text = null;
+
+  if (currentTab === 'texto') {
+    text = document.getElementById('text-input').value.trim();
+    if (!text) { setStatus('Escribe algo primero!', false); return; }
+  } else if (currentTab === 'dibujo') {
+    if (isCanvasBlank()) { setStatus('Dibuja algo primero!', false); return; }
+    text = canvas.toDataURL('image/png');
+  } else if (currentTab === 'foto') {
+    if (!uploadedDataUrl) { setStatus('Elige una foto primero!', false); return; }
+    text = uploadedDataUrl;
+  }
+
+  sendBtn.disabled = true;
+  setStatus('Publicando...', true);
+
+  firebase.database().ref('guestbook').push({ user, text, ts: Date.now() })
+    .then(() => {
+      setStatus('Publicado!', true);
+      sendBtn.disabled = false;
+      document.getElementById('text-input').value = '';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      uploadedDataUrl = null;
+      document.getElementById('upload-preview').style.display = 'none';
+      document.getElementById('upload-preview').src = '';
+      document.getElementById('file-input').value = '';
+    })
+    .catch(err => {
+      setStatus('Error: ' + err.message, false);
+      sendBtn.disabled = false;
+    });
+}
+
+document.getElementById('text-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitPost(); }
+});
+</script>
+</body>
+</html>
